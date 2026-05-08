@@ -105,6 +105,20 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+
+    // Avoid duplicate native lib clashes between vision-camera, fast-tflite,
+    // reanimated and worklets-core when packaging the APK.
+    packagingOptions {
+        pickFirst '**/libc++_shared.so'
+        pickFirst '**/libfbjni.so'
+        pickFirst '**/libjsi.so'
+    }
+
+    // Bundle the .tflite model verbatim, otherwise aapt will gzip it and the
+    // TFLite runtime fails to mmap it on device.
+    androidResources {
+        noCompress += ['tflite']
+    }
 }
 
 dependencies {

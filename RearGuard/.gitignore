@@ -73,3 +73,9 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# RearGuard generated assets (re-fetched by `npm run setup:assets`)
+.cache/
+android/app/src/main/res/raw/beep.wav
+src/assets/coco_labels.txt
+src/assets/coco_ssd_mobilenet.tflite
