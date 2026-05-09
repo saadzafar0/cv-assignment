@@ -7,6 +7,5 @@ module.exports = {
         processNestedWorklets: true,
       },
     ],
-    'react-native-reanimated/plugin',
   ],
 };

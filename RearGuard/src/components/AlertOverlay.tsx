@@ -1,13 +1,5 @@
-import React, { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, StyleSheet } from 'react-native';
 
 import { ZONE_COLORS, type Zone } from '../utils/constants';
 
@@ -17,41 +9,56 @@ interface AlertOverlayProps {
 
 /**
  * A full-screen, pointer-event-transparent overlay that pulses a thick red
- * border whenever the zone is `danger`. Driven entirely on the UI thread by
- * Reanimated, so it stays smooth even while the JS thread is busy decoding
- * detections.
+ * border whenever the zone is `danger`. Uses React Native's built-in Animated
+ * API with `useNativeDriver: true`, which runs the opacity tween on the UI
+ * thread (same effective performance as Reanimated for this case) without
+ * needing a worklets babel plugin.
  */
-export function AlertOverlay({ zone }: AlertOverlayProps): React.ReactElement | null {
-  const opacity = useSharedValue(0);
+export function AlertOverlay({ zone }: AlertOverlayProps): React.ReactElement {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const loopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
+    loopRef.current?.stop();
+
     if (zone === 'danger') {
-      opacity.value = withRepeat(
-        withTiming(1, { duration: 500, easing: Easing.inOut(Easing.quad) }),
-        -1,
-        true,
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 1,
+            duration: 500,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0,
+            duration: 500,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
       );
+      loopRef.current = loop;
+      loop.start();
     } else {
-      cancelAnimation(opacity);
-      opacity.value = withTiming(0, { duration: 150 });
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start();
     }
+
+    return () => {
+      loopRef.current?.stop();
+    };
   }, [zone, opacity]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-  }));
-
-  if (zone !== 'danger') {
-    // Still render so cleanup runs cleanly; opacity is 0.
-  }
 
   return (
     <Animated.View
       pointerEvents="none"
       style={[
         styles.overlay,
-        { borderColor: ZONE_COLORS.danger },
-        animatedStyle,
+        { borderColor: ZONE_COLORS.danger, opacity },
       ]}
     />
   );

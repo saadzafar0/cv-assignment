@@ -124,7 +124,7 @@ export function useObjectDetection(): UseObjectDetectionResult {
         const score = Number(scores[i]);
         const classId = Number(classes[i]) | 0;
         if (score < SCORE_THRESHOLD) continue;
-        if (!PRIORITY_CLASS_IDS.has(classId)) continue;
+        if (!PRIORITY_CLASS_IDS.includes(classId)) continue;
 
         const yMin = Number(locations[i * 4]);
         const xMin = Number(locations[i * 4 + 1]);

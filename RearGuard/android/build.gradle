@@ -4,7 +4,7 @@ buildscript {
         minSdkVersion = 24
         compileSdkVersion = 36
         targetSdkVersion = 36
-        ndkVersion = "27.1.12297006"
+        ndkVersion = "30.0.14904198"
         kotlinVersion = "2.1.20"
     }
     repositories {
@@ -19,3 +19,23 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// Force every native subproject (react-native-worklets-core, vision-camera,
+// reanimated, fast-tflite, etc.) to use the same NDK as the app module.
+// Without this, AGP falls back to its bundled-default NDK version per
+// subproject and tries to auto-download it, which both fragments the toolchain
+// and wastes ~1.5 GB of disk per extra NDK.
+//
+// We hook `pluginManager.withPlugin` instead of `afterEvaluate` because some
+// subprojects are already evaluated by the time this block runs, which would
+// throw "Cannot run Project.afterEvaluate(Closure) when the project is already
+// evaluated."
+subprojects {
+    def applyNdk = {
+        android {
+            ndkVersion rootProject.ext.ndkVersion
+        }
+    }
+    pluginManager.withPlugin('com.android.application', applyNdk)
+    pluginManager.withPlugin('com.android.library', applyNdk)
+}

@@ -1,0 +1,41 @@
+diff --git a/node_modules/react-native-worklets-core/lib/commonjs/plugin/index.js b/node_modules/react-native-worklets-core/lib/commonjs/plugin/index.js
+index 71afd5d..28cb633 100644
+--- a/node_modules/react-native-worklets-core/lib/commonjs/plugin/index.js
++++ b/node_modules/react-native-worklets-core/lib/commonjs/plugin/index.js
+@@ -221,7 +221,7 @@ function makeWorklet(t, fun, state) {
+   const transformed = transformSync(code, {
+     filename: state.file.opts.filename,
+     presets: ["@babel/preset-typescript"],
+-    plugins: ["@babel/plugin-transform-shorthand-properties", "@babel/plugin-transform-arrow-functions", "@babel/plugin-proposal-optional-chaining", "@babel/plugin-proposal-nullish-coalescing-operator", ["@babel/plugin-transform-template-literals", {
++    plugins: ["@babel/plugin-transform-shorthand-properties", "@babel/plugin-transform-arrow-functions", "@babel/plugin-transform-optional-chaining", "@babel/plugin-transform-nullish-coalescing-operator", ["@babel/plugin-transform-template-literals", {
+       loose: true
+     }]],
+     ast: true,
+diff --git a/node_modules/react-native-worklets-core/lib/module/plugin/index.js b/node_modules/react-native-worklets-core/lib/module/plugin/index.js
+index 71afd5d..28cb633 100644
+--- a/node_modules/react-native-worklets-core/lib/module/plugin/index.js
++++ b/node_modules/react-native-worklets-core/lib/module/plugin/index.js
+@@ -221,7 +221,7 @@ function makeWorklet(t, fun, state) {
+   const transformed = transformSync(code, {
+     filename: state.file.opts.filename,
+     presets: ["@babel/preset-typescript"],
+-    plugins: ["@babel/plugin-transform-shorthand-properties", "@babel/plugin-transform-arrow-functions", "@babel/plugin-proposal-optional-chaining", "@babel/plugin-proposal-nullish-coalescing-operator", ["@babel/plugin-transform-template-literals", {
++    plugins: ["@babel/plugin-transform-shorthand-properties", "@babel/plugin-transform-arrow-functions", "@babel/plugin-transform-optional-chaining", "@babel/plugin-transform-nullish-coalescing-operator", ["@babel/plugin-transform-template-literals", {
+       loose: true
+     }]],
+     ast: true,
+diff --git a/node_modules/react-native-worklets-core/src/plugin/index.js b/node_modules/react-native-worklets-core/src/plugin/index.js
+index df4f07a..89a5c7b 100644
+--- a/node_modules/react-native-worklets-core/src/plugin/index.js
++++ b/node_modules/react-native-worklets-core/src/plugin/index.js
+@@ -416,8 +416,8 @@ function makeWorklet(t, fun, state) {
+     plugins: [
+       "@babel/plugin-transform-shorthand-properties",
+       "@babel/plugin-transform-arrow-functions",
+-      "@babel/plugin-proposal-optional-chaining",
+-      "@babel/plugin-proposal-nullish-coalescing-operator",
++      "@babel/plugin-transform-optional-chaining",
++      "@babel/plugin-transform-nullish-coalescing-operator",
+       ["@babel/plugin-transform-template-literals", { loose: true }],
+     ],
+     ast: true,

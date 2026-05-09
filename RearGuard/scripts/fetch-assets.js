@@ -5,7 +5,7 @@
  *
  *   1. Downloads the MobileNet-SSD v1 COCO quantized TFLite model + label
  *      map from the public TensorFlow CDN and unpacks them to:
- *        android/app/src/main/assets/coco_ssd_mobilenet.tflite
+ *        src/assets/coco_ssd_mobilenet.tflite
  *        src/assets/coco_labels.txt
  *
  *   2. Synthesises a 100 ms / 880 Hz mono 16-bit PCM "beep" WAV at:
@@ -15,15 +15,14 @@
  * as a warning so it doesn't break `npm install` for offline contributors.
  * Re-run manually with `npm run setup:assets`.
  *
- * Requires Node >=18 and the `unzip` system tool (preinstalled on macOS,
- * available via apt/yum/brew on Linux). On Windows, install via 7-Zip or
- * use WSL.
+ * Pure-Node implementation — works on Windows, macOS and Linux without any
+ * external tools (no `unzip` required). Requires Node >= 18.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 const https = require('node:https');
-const { execSync } = require('node:child_process');
+const zlib = require('node:zlib');
 
 const ROOT = path.resolve(__dirname, '..');
 const MODEL_URL =
@@ -70,6 +69,66 @@ function download(url, dest, attempt = 0) {
   });
 }
 
+/**
+ * Pure-Node ZIP entry extractor — no external `unzip` required.
+ *
+ * Handles the subset of the spec actually used by the TensorFlow CDN bundle:
+ * single-volume archives, `store` (0) and `deflate` (8) compression, no
+ * encryption, no Zip64. That covers the MobileNet-SSD COCO archive.
+ */
+function extractFileFromZip(zipPath, entryName) {
+  const buf = fs.readFileSync(zipPath);
+
+  // Locate the End Of Central Directory record (signature 0x06054b50).
+  // It lives in the last 22 + up-to-65535 bytes of the file.
+  const EOCD_SIG = 0x06054b50;
+  const minStart = Math.max(0, buf.length - (22 + 0xffff));
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= minStart; i--) {
+    if (buf.readUInt32LE(i) === EOCD_SIG) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd === -1) {
+    throw new Error('ZIP: end-of-central-directory record not found');
+  }
+
+  const totalEntries = buf.readUInt16LE(eocd + 10);
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+
+  let p = cdOffset;
+  for (let i = 0; i < totalEntries; i++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) {
+      throw new Error(`ZIP: bad central-directory header at offset ${p}`);
+    }
+    const compMethod = buf.readUInt16LE(p + 10);
+    const compSize = buf.readUInt32LE(p + 20);
+    const fnLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const localOffset = buf.readUInt32LE(p + 42);
+    const name = buf.slice(p + 46, p + 46 + fnLen).toString('utf8');
+
+    if (name === entryName) {
+      if (buf.readUInt32LE(localOffset) !== 0x04034b50) {
+        throw new Error(`ZIP: bad local file header for ${entryName}`);
+      }
+      const lFnLen = buf.readUInt16LE(localOffset + 26);
+      const lExtraLen = buf.readUInt16LE(localOffset + 28);
+      const dataStart = localOffset + 30 + lFnLen + lExtraLen;
+      const compData = buf.slice(dataStart, dataStart + compSize);
+
+      if (compMethod === 0) return compData;
+      if (compMethod === 8) return zlib.inflateRawSync(compData);
+      throw new Error(`ZIP: unsupported compression method ${compMethod}`);
+    }
+
+    p += 46 + fnLen + extraLen + commentLen;
+  }
+  throw new Error(`ZIP: entry "${entryName}" not found`);
+}
+
 async function fetchModel() {
   if (fs.existsSync(TFLITE_OUT) && fs.existsSync(LABELS_OUT)) {
     console.log('[fetch-assets] model + labels already present, skipping download');
@@ -82,15 +141,10 @@ async function fetchModel() {
   await download(MODEL_URL, TMP_ZIP);
 
   console.log('[fetch-assets] unpacking detect.tflite + labelmap.txt');
-  // execSync streams output as a Buffer when no encoding is set; cap at 50MB.
-  const tfliteBuf = execSync(`unzip -p ${JSON.stringify(TMP_ZIP)} detect.tflite`, {
-    maxBuffer: 50 * 1024 * 1024,
-  });
+  const tfliteBuf = extractFileFromZip(TMP_ZIP, 'detect.tflite');
   fs.writeFileSync(TFLITE_OUT, tfliteBuf);
 
-  const labelBuf = execSync(`unzip -p ${JSON.stringify(TMP_ZIP)} labelmap.txt`, {
-    maxBuffer: 1 * 1024 * 1024,
-  });
+  const labelBuf = extractFileFromZip(TMP_ZIP, 'labelmap.txt');
   fs.writeFileSync(LABELS_OUT, labelBuf);
 
   console.log(`[fetch-assets] wrote ${TFLITE_OUT} (${(tfliteBuf.length / 1024).toFixed(0)} KB)`);

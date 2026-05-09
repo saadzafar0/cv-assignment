@@ -165,7 +165,10 @@ export const COCO_LABELS: readonly string[] = [
  */
 export const PRIORITY_CLASSES: readonly string[] = ['person', 'car', 'bus', 'truck'];
 
-/** Pre-computed numeric class ids matching PRIORITY_CLASSES against COCO_LABELS. */
-export const PRIORITY_CLASS_IDS: ReadonlySet<number> = new Set(
-  PRIORITY_CLASSES.map((label) => COCO_LABELS.indexOf(label)).filter((id) => id >= 0),
-);
+/** Pre-computed numeric class ids matching PRIORITY_CLASSES against COCO_LABELS.
+ * Plain array (not Set): worklets clone closure values into the camera runtime,
+ * and Set loses its prototype there so `.has` would be undefined.
+ */
+export const PRIORITY_CLASS_IDS: readonly number[] = PRIORITY_CLASSES.map((label) =>
+  COCO_LABELS.indexOf(label),
+).filter((id) => id >= 0);
