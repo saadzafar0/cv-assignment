@@ -1,16 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { Camera } from 'react-native-vision-camera';
-import { useFocusEffect } from '@react-navigation/native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraFormat,
+} from 'react-native-vision-camera';
 
 import { CameraView } from '../components/CameraView';
 import { DistanceDisplay } from '../components/DistanceDisplay';
@@ -18,18 +19,53 @@ import { AlertOverlay } from '../components/AlertOverlay';
 import { useObjectDetection } from '../hooks/useObjectDetection';
 import { useDistanceCalc } from '../hooks/useDistanceCalc';
 import { useAlertSystem } from '../hooks/useAlertSystem';
-import { loadFocalLength } from '../utils/calibration';
-import { DEFAULT_FOCAL_LENGTH } from '../utils/constants';
-import type { RootStackParamList } from '../navigation/types';
+import {
+  DEFAULT_FOCAL_LENGTH,
+  FRAME_PROCESSOR_FPS,
+  TARGET_RESOLUTION,
+} from '../utils/constants';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Main'>;
+/**
+ * Compute the camera's focal length in pixels from the format's horizontal
+ * field-of-view. `frameWidth` must be the **horizontal** pixel dimension
+ * (i.e. `format.videoWidth`) because `fieldOfView` is the horizontal FOV.
+ * Falls back to DEFAULT_FOCAL_LENGTH when FOV is unavailable.
+ */
+function focalLengthFromFOV(fovDegrees: number, frameWidth: number): number {
+  if (fovDegrees <= 0 || frameWidth <= 0) {
+    return DEFAULT_FOCAL_LENGTH;
+  }
+  const fovRad = (fovDegrees * Math.PI) / 180;
+  return frameWidth / (2 * Math.tan(fovRad / 2));
+}
 
 /** Permission gating + main rear-collision UI. */
-export function MainScreen({ navigation }: Props): React.ReactElement {
+export function MainScreen(): React.ReactElement {
   const [permission, setPermission] = useState<'pending' | 'granted' | 'denied'>(
     'pending',
   );
-  const [focalLength, setFocalLength] = useState<number>(DEFAULT_FOCAL_LENGTH);
+
+  // Own the camera device + format here so we can read fieldOfView for the
+  // auto-computed focal length AND pass device/format down to CameraView.
+  const device = useCameraDevice('back');
+  const format = useCameraFormat(device, [
+    {
+      videoResolution: {
+        width: TARGET_RESOLUTION.width,
+        height: TARGET_RESOLUTION.height,
+      },
+    },
+    { fps: FRAME_PROCESSOR_FPS },
+  ]);
+
+  // Auto-compute focal length from the camera's horizontal field-of-view.
+  // fieldOfView is horizontal → pair with videoWidth, not videoHeight.
+  const focalLength = useMemo(() => {
+    if (format != null && format.fieldOfView > 0) {
+      return focalLengthFromFOV(format.fieldOfView, format.videoWidth);
+    }
+    return DEFAULT_FOCAL_LENGTH;
+  }, [format]);
 
   // Permission flow: ask once on mount.
   useEffect(() => {
@@ -48,24 +84,12 @@ export function MainScreen({ navigation }: Props): React.ReactElement {
     };
   }, []);
 
-  // Re-load the focal length whenever the screen regains focus, so updates
-  // from the calibration wizard take effect immediately.
-  useFocusEffect(
-    React.useCallback(() => {
-      let cancelled = false;
-      loadFocalLength().then((value) => {
-        if (!cancelled) setFocalLength(value);
-      });
-      return () => {
-        cancelled = true;
-      };
-    }, []),
-  );
-
   const detection = useObjectDetection();
   const { distanceM, zone } = useDistanceCalc(
     detection.nearest?.pixelWidth ?? null,
     focalLength,
+    detection.nearest?.label ?? null,
+    detection.tick,
   );
   useAlertSystem(zone);
 
@@ -96,9 +120,19 @@ export function MainScreen({ navigation }: Props): React.ReactElement {
     );
   }
 
+  if (device == null) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <Text style={styles.heading}>No back-facing camera detected.</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <CameraView
+        device={device}
+        format={format}
         detections={detection.detections}
         nearest={detection.nearest}
         frameWidth={detection.frameWidth}
@@ -128,25 +162,6 @@ export function MainScreen({ navigation }: Props): React.ReactElement {
           </Text>
         </View>
       )}
-
-      <Pressable
-        onPress={() =>
-          Alert.alert(
-            'Recalibrate?',
-            'Calibration is most accurate with a real car parked exactly 2 m behind the phone. Continue?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Calibrate',
-                onPress: () => navigation.navigate('Calibration'),
-              },
-            ],
-          )
-        }
-        style={({ pressed }) => [styles.calibrateBtn, pressed && styles.btnPressed]}
-      >
-        <Text style={styles.calibrateBtnText}>CALIBRATE</Text>
-      </Pressable>
     </View>
   );
 }
@@ -207,23 +222,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '600',
-  },
-  calibrateBtn: {
-    position: 'absolute',
-    bottom: 32,
-    left: 24,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.7)',
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-  },
-  calibrateBtnText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 2,
   },
   btnPressed: {
     opacity: 0.6,

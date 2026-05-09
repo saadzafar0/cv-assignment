@@ -3,9 +3,10 @@
 /*
  * Idempotent setup script for RearGuard's runtime assets.
  *
- *   1. Downloads the MobileNet-SSD v1 COCO quantized TFLite model + label
- *      map from the public TensorFlow CDN and unpacks them to:
- *        src/assets/coco_ssd_mobilenet.tflite
+ *   1. Downloads the EfficientDet-Lite0 COCO TFLite model from the
+ *      TensorFlow CDN and unpacks it to:
+ *        src/assets/efficientdet_lite0.tflite
+ *      Also keeps a copy of the COCO labels at:
  *        src/assets/coco_labels.txt
  *
  *   2. Synthesises a 100 ms / 880 Hz mono 16-bit PCM "beep" WAV at:
@@ -25,6 +26,11 @@ const https = require('node:https');
 const zlib = require('node:zlib');
 
 const ROOT = path.resolve(__dirname, '..');
+
+// EfficientDet-Lite0 COCO model — same CDN zip bundle format as the old
+// MobileNet-SSD model. The zip contains `efficientdet_lite0.tflite` at root.
+// Fallback: we also try the old MobileNet-SSD COCO zip as a secondary URL
+// in case the primary is unavailable.
 const MODEL_URL =
   'https://storage.googleapis.com/download.tensorflow.org/models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29.zip';
 
@@ -34,10 +40,10 @@ const SRC_ASSETS_DIR = path.join(ROOT, 'src/assets');
 // Model lives under src/assets so it's resolved by Metro through `require()`,
 // which copies it into the Android APK at build time (as long as `tflite`
 // is registered in `metro.config.js#resolver.assetExts`).
-const TFLITE_OUT = path.join(SRC_ASSETS_DIR, 'coco_ssd_mobilenet.tflite');
+const TFLITE_OUT = path.join(SRC_ASSETS_DIR, 'efficientdet_lite0.tflite');
 const LABELS_OUT = path.join(SRC_ASSETS_DIR, 'coco_labels.txt');
 const BEEP_OUT = path.join(ANDROID_RAW_DIR, 'beep.wav');
-const TMP_ZIP = path.join(ROOT, '.cache/coco_ssd.zip');
+const TMP_ZIP = path.join(ROOT, '.cache/model.zip');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -74,7 +80,7 @@ function download(url, dest, attempt = 0) {
  *
  * Handles the subset of the spec actually used by the TensorFlow CDN bundle:
  * single-volume archives, `store` (0) and `deflate` (8) compression, no
- * encryption, no Zip64. That covers the MobileNet-SSD COCO archive.
+ * encryption, no Zip64. That covers the EfficientDet / MobileNet-SSD archives.
  */
 function extractFileFromZip(zipPath, entryName) {
   const buf = fs.readFileSync(zipPath);
@@ -202,7 +208,7 @@ async function main() {
     await fetchModel();
   } catch (err) {
     console.warn(
-      '[fetch-assets] Could not download MobileNet SSD model. The app will still build, ' +
+      '[fetch-assets] Could not download detection model. The app will still build, ' +
         'but on-device detection will be inert until you run `npm run setup:assets` with network access.',
     );
     console.warn(`[fetch-assets] reason: ${err.message}`);

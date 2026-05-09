@@ -1,17 +1,19 @@
 import React, { useMemo } from 'react';
 import {
-  GestureResponderEvent,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { Camera, useCameraDevice, useCameraFormat } from 'react-native-vision-camera';
-import type { ReadonlyFrameProcessor } from 'react-native-vision-camera';
+import { Camera } from 'react-native-vision-camera';
+import type {
+  CameraDevice,
+  CameraDeviceFormat,
+  ReadonlyFrameProcessor,
+} from 'react-native-vision-camera';
 
 import {
   FRAME_PROCESSOR_FPS,
-  TARGET_RESOLUTION,
   ZONE_COLORS,
   type Zone,
 } from '../utils/constants';
@@ -79,6 +81,10 @@ export function mapDetectionToScreen(
 }
 
 interface CameraViewProps {
+  /** Camera device — owned by MainScreen for FOV computation. */
+  device: CameraDevice;
+  /** Camera format — owned by MainScreen for FOV computation. */
+  format: CameraDeviceFormat | undefined;
   /** Detections from the most recent frame; rendered as box overlays. */
   detections: Detection[];
   /** Raw frame dimensions reported by vision-camera. */
@@ -90,37 +96,27 @@ interface CameraViewProps {
   zone: Zone;
   /** Reference to the detection currently used for distance calculation (highlighted). */
   nearest?: Detection | null;
-  /** Optional tap handler called with the tapped detection (used in calibration). */
-  onTapDetection?: (detection: Detection) => void;
   /** When true, the camera is paused — useful for confirmation step. */
   paused?: boolean;
 }
 
 /**
  * Live rear-camera feed plus the translucent bounding-box overlay. Owns no
- * detection logic itself; pure presentation.
+ * detection logic itself; pure presentation. The camera device and format
+ * are received as props from MainScreen which also uses them for the
+ * FOV-based focal-length computation.
  */
 export function CameraView({
+  device,
+  format,
   detections,
   frameWidth,
   frameHeight,
   frameProcessor,
   zone,
   nearest,
-  onTapDetection,
   paused,
 }: CameraViewProps): React.ReactElement {
-  const device = useCameraDevice('back');
-  const format = useCameraFormat(device, [
-    {
-      videoResolution: {
-        width: TARGET_RESOLUTION.width,
-        height: TARGET_RESOLUTION.height,
-      },
-    },
-    { fps: FRAME_PROCESSOR_FPS },
-  ]);
-
   const [layout, setLayout] = React.useState<{ width: number; height: number }>({
     width: 0,
     height: 0,
@@ -142,32 +138,6 @@ export function CameraView({
     return boxes;
   }, [detections, frameWidth, frameHeight, layout]);
 
-  const handleOverlayPress = (event: GestureResponderEvent) => {
-    if (onTapDetection == null) return;
-    const { locationX, locationY } = event.nativeEvent;
-    // Hit-test in reverse render order so topmost box wins.
-    for (let i = screenBoxes.length - 1; i >= 0; i--) {
-      const b = screenBoxes[i];
-      if (
-        locationX >= b.left &&
-        locationX <= b.left + b.width &&
-        locationY >= b.top &&
-        locationY <= b.top + b.height
-      ) {
-        onTapDetection(b.detection);
-        return;
-      }
-    }
-  };
-
-  if (device == null) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <Text style={styles.error}>No back-facing camera detected.</Text>
-      </View>
-    );
-  }
-
   const borderColor = ZONE_COLORS[zone];
 
   return (
@@ -185,11 +155,9 @@ export function CameraView({
         frameProcessor={frameProcessor}
         pixelFormat="yuv"
       />
-      <Pressable
+      <View
         style={StyleSheet.absoluteFill}
-        onPress={handleOverlayPress}
-        // Don't intercept taps when no callback is wired up.
-        pointerEvents={onTapDetection != null ? 'auto' : 'none'}
+        pointerEvents="none"
       >
         {screenBoxes.map((b, idx) => {
           const isNearest = nearest != null && b.detection === nearest;
@@ -218,7 +186,7 @@ export function CameraView({
             </View>
           );
         })}
-      </Pressable>
+      </View>
     </View>
   );
 }

@@ -1,13 +1,13 @@
 import { useState } from 'react';
-import { useFrameProcessor } from 'react-native-vision-camera';
+import { runAtTargetFps, useFrameProcessor } from 'react-native-vision-camera';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useRunOnJS } from 'react-native-worklets-core';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
 
 import {
   COCO_LABELS,
+  MAX_DETECTIONS,
   MODEL_INPUT_SIZE,
-  PRIORITY_CLASS_IDS,
   SCORE_THRESHOLD,
 } from '../utils/constants';
 
@@ -63,15 +63,15 @@ export interface UseObjectDetectionResult extends DetectionsState {
 }
 
 /**
- * Frame-processor hook that runs MobileNet-SSD COCO on every camera frame and
- * exposes the latest detections + the "nearest" object (= widest bounding
- * box among priority classes) to React state.
+ * Frame-processor hook that runs EfficientDet-Lite0 COCO on every camera
+ * frame and exposes the latest detections + the "nearest" object (= widest
+ * bounding box across ALL detected classes) to React state.
  *
  * The hook is intentionally agnostic of distance/zone logic — that is layered
  * on top by `useDistanceCalc`.
  */
 export function useObjectDetection(): UseObjectDetectionResult {
-  const model = useTensorflowModel(require('../assets/coco_ssd_mobilenet.tflite'));
+  const model = useTensorflowModel(require('../assets/efficientdet_lite0.tflite'));
   const { resize } = useResizePlugin();
   const [state, setState] = useState<DetectionsState>(EMPTY_STATE);
 
@@ -95,64 +95,92 @@ export function useObjectDetection(): UseObjectDetectionResult {
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
+      
       if (loadedModel == null) {
         return;
       }
 
-      const inputBuffer = resize(frame, {
-        scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
-        pixelFormat: 'rgb',
-        dataType: 'uint8',
-      });
+      // Throttle inference to 5 FPS — the camera still renders at full FPS,
+      // but the heavy 448×448 model only runs 5 times per second.
+      runAtTargetFps(5, () => {
+        'worklet';
+        try {
+          // The 7.4MB Kaggle EfficientDet-Lite2 model is quantized and expects uint8 input.
+          const inputBuffer = resize(frame, {
+            scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          });
 
-      const outputs = loadedModel.runSync([inputBuffer]);
-      // SSD MobileNet COCO outputs (in this order):
-      //   0: locations [1, 10, 4]  -> ymin, xmin, ymax, xmax (normalised)
-      //   1: classes   [1, 10]     -> int class ids
-      //   2: scores    [1, 10]     -> float [0, 1]
-      //   3: numDets   [1]
-      const locations = outputs[0];
-      const classes = outputs[1];
-      const scores = outputs[2];
-      const numDetections = Math.min(Number(outputs[3][0] ?? 0), 10);
+          const outputs = loadedModel.runSync([inputBuffer]);
 
-      const detections: Detection[] = [];
-      let nearest: Detection | null = null;
-      let bestPixelWidth = 0;
+          // Guard: must have the standard 4-tensor post-processed output.
+          if (outputs == null || outputs.length < 4) {
+            pushState([], null, frame.width, frame.height);
+            return;
+          }
 
-      for (let i = 0; i < numDetections; i++) {
-        const score = Number(scores[i]);
-        const classId = Number(classes[i]) | 0;
-        if (score < SCORE_THRESHOLD) continue;
-        if (!PRIORITY_CLASS_IDS.includes(classId)) continue;
+          // TF Object Detection API standard output order:
+          //   0: locations  [1, N, 4] -> ymin, xmin, ymax, xmax (normalised)
+          //   1: classes    [1, N]    -> float class ids
+          //   2: scores     [1, N]    -> float [0, 1]
+          //   3: numDets    [1]
+          const locations = outputs[0];
+          const classes = outputs[1];
+          const scores = outputs[2];
+          const numDetsRaw = outputs[3];
 
-        const yMin = Number(locations[i * 4]);
-        const xMin = Number(locations[i * 4 + 1]);
-        const yMax = Number(locations[i * 4 + 2]);
-        const xMax = Number(locations[i * 4 + 3]);
+          const numDetections = Math.min(
+            Math.max(0, Math.round(Number(numDetsRaw[0] ?? 0))),
+            MAX_DETECTIONS,
+          );
 
-        const boxWidthNorm = Math.max(0, xMax - xMin);
-        const boxHeightNorm = Math.max(0, yMax - yMin);
-        const pixelWidth = boxWidthNorm * frame.width;
-        const pixelHeight = boxHeightNorm * frame.height;
+          const detections: Detection[] = [];
+          let nearest: Detection | null = null;
+          let bestPixelWidth = 0;
 
-        const det: Detection = {
-          box: { xMin, yMin, xMax, yMax },
-          pixelWidth,
-          pixelHeight,
-          classId,
-          label: COCO_LABELS[classId] ?? '???',
-          score,
-        };
-        detections.push(det);
+          for (let i = 0; i < numDetections; i++) {
+            const score = Number(scores[i] ?? 0);
+            if (score < SCORE_THRESHOLD) continue;
 
-        if (pixelWidth > bestPixelWidth) {
-          bestPixelWidth = pixelWidth;
-          nearest = det;
+            const classId = Math.round(Number(classes[i] ?? -1));
+            // Accept ALL valid class IDs — no filtering.
+            if (classId < 0 || classId >= COCO_LABELS.length) continue;
+
+            const label = COCO_LABELS[classId] ?? `class_${classId}`;
+
+            const yMin = Number(locations[i * 4] ?? 0);
+            const xMin = Number(locations[i * 4 + 1] ?? 0);
+            const yMax = Number(locations[i * 4 + 2] ?? 0);
+            const xMax = Number(locations[i * 4 + 3] ?? 0);
+
+            const boxWidthNorm = Math.max(0, xMax - xMin);
+            const boxHeightNorm = Math.max(0, yMax - yMin);
+            const pixelWidth = boxWidthNorm * frame.width;
+            const pixelHeight = boxHeightNorm * frame.height;
+
+            const det: Detection = {
+              box: { xMin, yMin, xMax, yMax },
+              pixelWidth,
+              pixelHeight,
+              classId,
+              label,
+              score,
+            };
+            detections.push(det);
+
+            if (pixelWidth > bestPixelWidth) {
+              bestPixelWidth = pixelWidth;
+              nearest = det;
+            }
+          }
+
+          pushState(detections, nearest, frame.width, frame.height);
+        } catch (e) {
+          console.warn('[TFLite] frame error:', String(e));
+          pushState([], null, frame.width, frame.height);
         }
-      }
-
-      pushState(detections, nearest, frame.width, frame.height);
+      });
     },
     [loadedModel, resize, pushState],
   );

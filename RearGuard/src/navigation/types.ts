@@ -4,5 +4,4 @@
  */
 export type RootStackParamList = {
   Main: undefined;
-  Calibration: undefined;
 };

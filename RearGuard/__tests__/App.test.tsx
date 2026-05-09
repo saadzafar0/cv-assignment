@@ -10,10 +10,12 @@
 import {
   computeFocalLength,
   pixelsToDistanceCm,
+  realWidthForLabel,
 } from '../src/utils/calibration';
 import {
   DEFAULT_FOCAL_LENGTH,
-  REAL_CAR_WIDTH_CM,
+  DEFAULT_REAL_WIDTH_CM,
+  REAL_WIDTHS_CM,
 } from '../src/utils/constants';
 
 describe('calibration math', () => {
@@ -28,13 +30,55 @@ describe('calibration math', () => {
     // Calibrate at 200 cm with some pixel width, then assert we recover the distance.
     const knownDistanceCm = 200;
     const pixelWidth = 320;
-    const focal = computeFocalLength(pixelWidth, knownDistanceCm, REAL_CAR_WIDTH_CM);
-    const recovered = pixelsToDistanceCm(pixelWidth, focal, REAL_CAR_WIDTH_CM);
+    const realWidth = 170;
+    const focal = computeFocalLength(pixelWidth, knownDistanceCm, realWidth);
+    const recovered = pixelsToDistanceCm(pixelWidth, focal, realWidth);
     expect(recovered).toBeCloseTo(knownDistanceCm, 4);
   });
 
   test('default focal length is sane (non-zero, finite)', () => {
     expect(DEFAULT_FOCAL_LENGTH).toBeGreaterThan(0);
     expect(Number.isFinite(DEFAULT_FOCAL_LENGTH)).toBe(true);
+  });
+
+  test('default focal length is 763 (derived from ~80° horizontal FOV at 1280px width)', () => {
+    expect(DEFAULT_FOCAL_LENGTH).toBe(763);
+  });
+});
+
+describe('per-class width lookup', () => {
+  test('known classes return their specific width', () => {
+    expect(realWidthForLabel('car')).toBe(170);
+    expect(realWidthForLabel('person')).toBe(45);
+    expect(realWidthForLabel('truck')).toBe(250);
+    expect(realWidthForLabel('bus')).toBe(260);
+    expect(realWidthForLabel('laptop')).toBe(35);
+  });
+
+  test('unknown / ??? classes return the default fallback width', () => {
+    expect(realWidthForLabel('???')).toBe(DEFAULT_REAL_WIDTH_CM);
+    expect(realWidthForLabel('nonexistent_class')).toBe(DEFAULT_REAL_WIDTH_CM);
+  });
+
+  test('REAL_WIDTHS_CM has entries for all main COCO classes', () => {
+    const mainClasses = ['person', 'car', 'bus', 'truck', 'bicycle', 'motorcycle', 'dog', 'cat'];
+    for (const cls of mainClasses) {
+      expect(REAL_WIDTHS_CM[cls]).toBeDefined();
+      expect(REAL_WIDTHS_CM[cls]).toBeGreaterThan(0);
+    }
+  });
+
+  test('per-class width changes distance calculation', () => {
+    const focalLength = DEFAULT_FOCAL_LENGTH; // 763
+    const pixelWidth = 200;
+    // Car at 170 cm real width vs person at 45 cm real width
+    const carDistance = pixelsToDistanceCm(pixelWidth, focalLength, realWidthForLabel('car'));
+    const personDistance = pixelsToDistanceCm(pixelWidth, focalLength, realWidthForLabel('person'));
+    // Person should read much closer than car at same pixel width
+    expect(personDistance).toBeLessThan(carDistance);
+    // Specifically: person = (45 * 763) / 200 = 171.675 cm
+    expect(personDistance).toBeCloseTo(171.675, 0);
+    // Car = (170 * 763) / 200 = 648.55 cm
+    expect(carDistance).toBeCloseTo(648.55, 0);
   });
 });

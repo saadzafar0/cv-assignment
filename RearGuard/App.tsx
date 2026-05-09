@@ -15,7 +15,6 @@ import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { MainScreen } from './src/screens/MainScreen';
-import { CalibrationScreen } from './src/screens/CalibrationScreen';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -48,7 +47,6 @@ function App(): React.ReactElement {
             }}
           >
             <Stack.Screen name="Main" component={MainScreen} />
-            <Stack.Screen name="Calibration" component={CalibrationScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </SafeAreaProvider>
