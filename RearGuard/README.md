@@ -2,8 +2,8 @@
 
 A bare React Native Android app that turns a phone mounted facing backward in
 a car into a real-time rear-collision warning system. The rear camera streams
-frames through an on-device MobileNet-SSD COCO TFLite model; the bounding-box
-pixel width of the nearest detected vehicle is converted into a real-world
+frames through an on-device EfficientDet-Lite2 (INT8) TFLite model; the bounding-box
+pixel width of the nearest detected object is converted into a real-world
 distance via the pinhole-camera formula and mapped to coloured alert zones.
 
 | Zone    | Distance      | UI                | Audio          | Haptics      |
@@ -17,8 +17,8 @@ distance via the pinhole-camera formula and mapped to coloured alert zones.
 - React Native 0.85 (bare workflow)
 - TypeScript only
 - `react-native-vision-camera` v4 + `react-native-worklets-core` for camera & frame processors
-- `vision-camera-resize-plugin` to convert camera frames to a 300x300 RGB tensor
-- `react-native-fast-tflite` running the `coco_ssd_mobilenet_v1_1.0_quant_2018_06_29` model
+- `vision-camera-resize-plugin` to convert camera frames to a 448x448 RGB tensor
+- `react-native-fast-tflite` running the EfficientDet-Lite2 model (from Kaggle TF OD API)
 - `react-native-reanimated` v3 for the danger pulse + UI animations
 - `react-native-sound` for the beep, played from a procedurally-generated WAV
 - `@react-native-async-storage/async-storage` to persist the calibrated focal length
@@ -50,7 +50,7 @@ metro.config.js               Adds `tflite` to assetExts so require() works on t
 
 src/
   assets/
-    coco_ssd_mobilenet.tflite   downloaded by setup:assets
+    efficientdet_lite0.tflite   downloaded by setup:assets (note: contains EfficientDet-Lite2 weights)
     coco_labels.txt             downloaded by setup:assets (reference only — labels are inlined in constants.ts)
   components/
     CameraView.tsx              live camera + bounding-box overlay
@@ -119,11 +119,8 @@ npx tsc --noEmit
 
 ## Notes & caveats
 
-- The MobileNet-SSD COCO model only knows about `car`, `truck`, `bus`, and
-  `person` from this app's perspective; everything else is filtered out.
+- The EfficientDet-Lite2 model tracks all valid COCO dataset objects without hardcoded filtering, allowing broader obstacle detection.
 - Distance accuracy is a function of how well calibrated the focal length is
   *and* how close the real-world object width matches `REAL_CAR_WIDTH_CM`. A
   truck or van will read closer than it really is unless you recalibrate.
-- The frame processor runs at 15 fps to keep latency low without burning
-  battery. Bump `FRAME_PROCESSOR_FPS` in `src/utils/constants.ts` if you
-  want smoother box overlays.
+- The ML inference is throttled to 5 FPS using `runAtTargetFps(5)` to conserve battery and keep the camera preview perfectly smooth at 15 FPS.
